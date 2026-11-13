@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Langton's Ant Lab</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@600&display=swap">
+<style>
+  /* One device: a recessed screen above a deck of seven bat-handle toggle switches, an aluminium
+     speed knob and a latching run button. The machine is a size container; everything inside is
+     sized in cqw so the whole device scales as one piece. */
+  :root {
+    --bg: #d6d2c8;
+    --case-hi: #f6f3ec; --case: #e9e5dc; --case-lo: #d3cec2;
+    --engrave: #858073; --engrave-hi: rgba(255, 255, 255, 0.75);
+    --ink0: #f7f5ef;     /* colour 0: empty cell */
+    --ink1: #17181a;     /* colour 1 */
+    --accent: #3c4fe0;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #08090b;
+      --case-hi: #3a3e44; --case: #2a2d32; --case-lo: #1d1f23;
+      --engrave: #8b9098; --engrave-hi: rgba(0, 0, 0, 0.55);
+      --ink0: #0f1216; --ink1: #ece8de; --accent: #8d9bff;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #08090b;
+    --case-hi: #3a3e44; --case: #2a2d32; --case-lo: #1d1f23;
+    --engrave: #8b9098; --engrave-hi: rgba(0, 0, 0, 0.55);
+    --ink0: #0f1216; --ink1: #ece8de; --accent: #8d9bff;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    min-height: 100vh; min-height: 100dvh;
+    display: grid; place-items: center;
+    padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+             max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    font-family: var(--font-mono);
+  }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+
+  /* ---------- case ---------- */
+  /* Machine height is about 1.8 × its width, so it is also fitted to the viewport height. */
+  .machine {
+    container-type: inline-size; position: relative;
+    width: min(100%, 540px, calc((100vh - 48px) / 1.8));
+    width: min(100%, 540px, calc((100dvh - 48px) / 1.8));
+    min-width: min(100%, 300px);
+    border-radius: 18px;
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.07'/%3E%3C/svg%3E"),
+      linear-gradient(168deg, var(--case-hi), var(--case) 38%, var(--case-lo));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -3px 0 rgba(0, 0, 0, 0.18),
+      inset 0 0 0 1px rgba(0, 0, 0, 0.08),
+      0 2px 3px rgba(0, 0, 0, 0.25), 0 18px 40px -12px rgba(0, 0, 0, 0.55);
+    user-select: none; -webkit-user-select: none;
+  }
+  .face { padding: 4.5cqw; display: flex; flex-direction: column; gap: 3.5cqw; }
+  .engraved { color: var(--engrave); text-shadow: 0 1px 0 var(--engrave-hi); font-weight: 600; letter-spacing: 0.08em; line-height: 1; }
+
+  .screw {
+    position: absolute; width: 2.5cqw; height: 2.5cqw; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fdfdfd, #aeb3b9 55%, #6b7077);
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  }
+  .screw::after {
+    content: ""; position: absolute; left: 16%; right: 16%; top: calc(50% - 0.22cqw); height: 0.44cqw;
+    background: #4f5359; border-radius: 1px; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55); transform: rotate(var(--r, 0deg));
+  }
+  .screw.tl { left: 1.1cqw; top: 1.1cqw; --r: 32deg; }
+  .screw.tr { right: 1.1cqw; top: 1.1cqw; --r: -61deg; }
+  .screw.bl { left: 1.1cqw; bottom: 1.1cqw; --r: 78deg; }
+  .screw.br { right: 1.1cqw; bottom: 1.1cqw; --r: 12deg; }
+
+  /* ---------- screen ---------- */
+  .bezel {
+    background: linear-gradient(180deg, #1b1d20, #0b0c0e);
+    padding: 1.6cqw; border-radius: 2.4cqw;
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.75), 0 1px 0 rgba(255, 255, 255, 0.55), 0 -1px 0 rgba(0, 0, 0, 0.2);
+  }
+  .glass { position: relative; aspect-ratio: 5 / 7; border-radius: 1cqw; overflow: hidden; background: var(--ink0); }
+  .glass::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+    background: linear-gradient(152deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 34%, rgba(255, 255, 255, 0) 35%);
+    box-shadow: inset 0 0 2.5cqw rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+  }
+  canvas#view { width: 100%; height: 100%; display: block; }
+
+  /* ---------- control deck ---------- */
+  /* row 1: twelve switches across the full width; row 2: knob, readout, run button */
+  .deck { display: flex; flex-direction: column; gap: 3cqw; }
+  .row2 { display: flex; align-items: center; justify-content: space-between; gap: 3cqw; height: 19cqw; }
+
+  /* toggle switches */
+  .bank { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+  .legend { display: flex; flex-direction: column; justify-content: space-between; height: 11.5cqw; font-size: 2.4cqw; }
+  .sw { width: 6.4cqw; height: 16cqw; cursor: ns-resize; touch-action: none; -webkit-tap-highlight-color: transparent; }
+
+  /* LCD readout: the current rule and speed */
+  .lcd {
+    flex: 1 1 auto; min-width: 0; height: 12cqw; padding: 1.2cqw 2.2cqw;
+    display: flex; flex-direction: column; justify-content: center; gap: 0.8cqw;
+    border-radius: 1cqw; color: #1c2318;
+    background: linear-gradient(180deg, #9cad8b, #b5c3a3 60%, #aebd9c);
+    box-shadow: inset 0 0.4cqw 0.9cqw rgba(0, 0, 0, 0.45), 0 0 0 0.9cqw #141618, 0 1px 0 0.9cqw rgba(255, 255, 255, 0.45);
+    font-family: var(--font-mono); line-height: 1; text-shadow: 0.18cqw 0.18cqw 0 rgba(0, 0, 0, 0.13);
+    overflow: hidden; white-space: nowrap;
+  }
+  .lcd .rule { font-size: 3.6cqw; letter-spacing: 0.12em; }
+  .lcd .rate { font-size: 2.4cqw; letter-spacing: 0.06em; opacity: 0.75; font-variant-numeric: tabular-nums; }
+  .sw svg { width: 100%; height: 100%; display: block; overflow: visible; }
+  .sw .lever, .sw .head-on { transform-box: view-box; transform-origin: 20px 50px; }
+  .sw .lever { transition: transform 170ms cubic-bezier(.3, 1.35, .5, 1); transform: scaleY(0); }
+  .sw .head-on { transition: transform 120ms, opacity 120ms; transform: scale(0.5); opacity: 0; }
+  .sw[data-pos="L"] .lever.up, .sw[data-pos="R"] .lever.down { transform: scaleY(1); }
+  .sw[data-pos="O"] .head-on { transform: scale(1); opacity: 1; }
+
+  /* speed knob */
+  .knob { position: relative; width: 19cqw; height: 19cqw; flex: 0 0 auto; cursor: grab; touch-action: none; border-radius: 50%; --rot: 0deg; }
+  .knob:active { cursor: grabbing; }
+  .knob .scale { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .knob .scale line { stroke: var(--engrave); stroke-width: 1.6; stroke-linecap: round; }
+  .knob .scale text { fill: var(--engrave); font: 600 7.5px var(--font-mono); letter-spacing: 0.08em; }
+  .knob .skirt {
+    position: absolute; inset: 17%; border-radius: 50%;
+    background:
+      radial-gradient(circle, transparent 58%, rgba(0, 0, 0, 0.35) 100%),
+      repeating-conic-gradient(from 0deg, #1b1d20 0deg 4deg, #44484e 4deg 8deg);
+    box-shadow: 0 0.5cqw 0.4cqw rgba(0, 0, 0, 0.35), 0 1.2cqw 1.8cqw rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.6);
+    transform: rotate(var(--rot));
+  }
+  .knob .cap {
+    position: absolute; inset: 27%; border-radius: 50%;
+    background: conic-gradient(from 20deg, #d4d6d9, #fbfbfc 9%, #aeb2b7 22%, #eceef0 36%, #a2a6ac 51%, #f4f5f6 64%, #b3b7bc 79%, #e6e8ea 91%, #d4d6d9);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.9), inset 0 -0.4cqw 0.8cqw rgba(0, 0, 0, 0.3), 0 0.2cqw 0.4cqw rgba(0, 0, 0, 0.45);
+  }
+  .knob .pointer { position: absolute; inset: 27%; border-radius: 50%; transform: rotate(var(--rot)); pointer-events: none; }
+  .knob .pointer::after {
+    content: ""; position: absolute; left: calc(50% - 0.4cqw); top: 7%; width: 0.8cqw; height: 32%;
+    border-radius: 1cqw; background: #e4572e; box-shadow: inset 0 -1px 1px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.25);
+  }
+
+  /* latching run button with status LED */
+  .run { display: flex; flex-direction: column; align-items: center; gap: 1.3cqw; flex: 0 0 auto; }
+  .led-row { display: flex; align-items: center; gap: 1cqw; font-size: 2.2cqw; }
+  .led {
+    width: 2.2cqw; height: 2.2cqw; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #6a776c, #1a221b 72%);
+    box-shadow: 0 0 0 0.4cqw #a3a8ae, 0 0 0 0.55cqw rgba(0, 0, 0, 0.3), inset 0 1px 2px rgba(0, 0, 0, 0.6);
+    transition: background 120ms, box-shadow 120ms;
+  }
+  .led.on {
+    background: radial-gradient(circle at 35% 30%, #f3fff5 0%, #59ff86 35%, #10a13a 82%);
+    box-shadow: 0 0 0 0.4cqw #a3a8ae, 0 0 0 0.55cqw rgba(0, 0, 0, 0.3), 0 0 1.8cqw 0.4cqw rgba(89, 255, 134, 0.6);
+  }
+  .play {
+    width: 14.5cqw; height: 12.5cqw; padding: 0.9cqw; border: 0; border-radius: 2cqw; cursor: pointer;
+    background: linear-gradient(160deg, #f6f7f8, #a9aeb4 48%, #e2e5e8 68%, #7c8188);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.9), inset 0 -1px 2px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.4);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .play .well { display: block; width: 100%; height: 100%; padding: 0.5cqw; border-radius: 1.3cqw; background: #0b0c0e; box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85); }
+  .play .cap {
+    display: grid; place-items: center; width: 100%; height: 100%; border-radius: 1cqw; color: #e9e6de;
+    background: linear-gradient(180deg, #50545b, #2c2f34 55%, #212327);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 0.7cqw 0 #07080a, 0 0.9cqw 1.1cqw rgba(0, 0, 0, 0.5);
+    transform: translateY(-0.6cqw);
+    transition: transform 90ms, box-shadow 90ms;
+  }
+  .play .cap svg { width: 62%; height: 62%; display: block; opacity: 0.92; filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.7)); }
+  .play[aria-pressed="true"] .cap {
+    transform: translateY(0); background: linear-gradient(180deg, #45494f, #272a2e 55%, #1d1f22);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 0.12cqw 0 #07080a, 0 0.2cqw 0.4cqw rgba(0, 0, 0, 0.5);
+  }
+  .play:active .cap { transform: translateY(0.15cqw); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 0 #07080a; }
+  .play:focus-visible { outline-offset: 4px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sw .lever, .sw .head-on, .led, .play .cap { transition: none; }
+  }
+</style>
+</head>
+<body>
+<!-- shared gradients and shadow for the toggle switches -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="g-chrome" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#5b5f65"/><stop offset=".32" stop-color="#f6f7f9"/>
+      <stop offset=".55" stop-color="#c3c7cc"/><stop offset="1" stop-color="#474b51"/>
+    </linearGradient>
+    <radialGradient id="g-washer" cx=".4" cy=".35" r=".75">
+      <stop offset="0" stop-color="#f1f3f5"/><stop offset=".7" stop-color="#a3a8af"/><stop offset="1" stop-color="#5e636a"/>
+    </radialGradient>
+    <linearGradient id="g-nut" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fdfdfd"/><stop offset=".45" stop-color="#9ea4ab"/>
+      <stop offset=".6" stop-color="#dfe2e6"/><stop offset="1" stop-color="#666b72"/>
+    </linearGradient>
+    <radialGradient id="g-spec" cx=".34" cy=".3" r=".6">
+      <stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".45" stop-color="#fff" stop-opacity=".25"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="g-shade" cx=".5" cy=".5" r=".5">
+      <stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".45"/>
+    </radialGradient>
+    <filter id="f-lift" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="1.3" dy="2.6" stdDeviation="1.4" flood-color="#000" flood-opacity=".45"/>
+    </filter>
+    <filter id="f-sit" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx=".6" dy="1.2" stdDeviation=".8" flood-color="#000" flood-opacity=".4"/>
+    </filter>
+  </defs>
+</svg>
+
+<main class="machine">
+  <h1 class="sr-only">Langton's Ant Lab</h1>
+  <span class="screw tl" aria-hidden="true"></span><span class="screw tr" aria-hidden="true"></span>
+  <span class="screw bl" aria-hidden="true"></span><span class="screw br" aria-hidden="true"></span>
+  <div class="face">
+    <div class="bezel"><div class="glass"><canvas id="view" aria-label="Langton's ant grid"></canvas></div></div>
+    <div class="deck">
+      <div class="bank" id="bank" role="group" aria-label="Rule switches: one per colour, L turns left, R turns right, off skips">
+        <div class="legend engraved" aria-hidden="true"><span>L</span><span>R</span></div>
+      </div>
+      <div class="row2">
+      <div class="knob" id="knob" role="slider" tabindex="0" aria-label="Speed" aria-valuemin="0" aria-valuemax="100">
+        <svg class="scale" id="scale" viewBox="0 0 100 100" aria-hidden="true">
+          <text x="50" y="98" text-anchor="middle">SPEED</text>
+        </svg>
+        <div class="skirt"></div>
+        <div class="cap"></div>
+        <div class="pointer"></div>
+      </div>
+      <div class="lcd" aria-hidden="true"><span class="rule" id="lcdRule">RL</span><span class="rate" id="lcdRate"></span></div>
+      <div class="run">
+        <div class="led-row engraved" aria-hidden="true"><span class="led" id="led"></span><span>RUN</span></div>
+        <button type="button" class="play" id="play" aria-label="Run" aria-pressed="false">
+          <span class="well"><span class="cap">
+            <svg viewBox="0 0 60 60" aria-hidden="true" fill="currentColor">
+              <polygon points="7,14 28,30 7,46"/><rect x="35" y="14" width="6" height="32" rx="1"/><rect x="46" y="14" width="6" height="32" rx="1"/>
+            </svg>
+          </span></span>
+        </button>
+      </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var W = 200, H = 280, N = W * H, SWITCHES = 12;         // 12 switches: rules up to e.g. RRLLLRLLLRRR
+  var DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];          // up, right, down, left
+  var TURN = { R: 1, L: 3 };
+  var ACCENTS = ["#e4572e", "#2e86de", "#3cb371", "#f2b134", "#8e5bd0",   // colours 2..11
+                 "#2cc4c4", "#d6336c", "#8a9199", "#a0522d", "#7cb518"];
+  var RATE_MIN = 2, RATE_MAX = 600000;                 // speed knob range, steps per second
+  var VALUE = { R: 0, O: 1, L: 2 }, FROM_VALUE = ["R", "O", "L"], SPOKEN = { L: "left", O: "off", R: "right" };
+  var CAM_MIN = 26, CAM_PAD = 5, CAM_TAU = 0.45;       // tightest view in cells, margin around the trail, easing time (s)
+
+  var $ = function (id) { return document.getElementById(id); };
+  var view = $("view"), vctx = view.getContext("2d");
+  var off = document.createElement("canvas"), octx = off.getContext("2d");
+  off.width = W; off.height = H;
+  var reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var S = {
+    pos: ["R", "L", "O", "O", "O", "O", "O", "O", "O", "O", "O", "O"],   // classic ant: RL
+    rule: "", turns: [], colors: [], pal32: [],
+    grid: new Uint8Array(N), img: new ImageData(W, H), px: null,
+    x: W >> 1, y: H >> 1, dir: 0, running: false, speed: 60, rate: 1, stepAcc: 0,
+    bx0: 0, bx1: 0, by0: 0, by1: 0,                    // bounding box of every cell the ant has touched
+    cam: { w: CAM_MIN, cx: W / 2, cy: H / 2 }, dirty: true
+  };
+  S.px = new Uint32Array(S.img.data.buffer);
+
+  /* ---------- simulation ---------- */
+  function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function hexToABGR(h) {
+    var r = parseInt(h.slice(1, 3), 16), g = parseInt(h.slice(3, 5), 16), b = parseInt(h.slice(5, 7), 16);
+    return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+  }
+  function buildPalette() {
+    S.colors = [cssVar("--ink0") || "#f7f5ef", cssVar("--ink1") || "#17181a"].concat(ACCENTS);
+    S.pal32 = S.colors.map(hexToABGR);
+  }
+  function paintAll() { for (var i = 0; i < N; i++) S.px[i] = S.pal32[S.grid[i]]; }
+  function clearGrid() {
+    S.grid.fill(0); S.px.fill(S.pal32[0]);
+    S.x = W >> 1; S.y = H >> 1; S.dir = 0;
+    S.bx0 = S.bx1 = S.x; S.by0 = S.by1 = S.y;
+  }
+
+  function run(count) {
+    var k = S.rule.length; if (!k) return;
+    var grid = S.grid, px = S.px, pal = S.pal32, turns = S.turns;
+    var x = S.x, y = S.y, dir = S.dir, bx0 = S.bx0, bx1 = S.bx1, by0 = S.by0, by1 = S.by1;
+    for (var n = 0; n < count; n++) {
+      var idx = y * W + x, c = grid[idx];
+      dir = (dir + turns[c]) & 3;
+      var nc = c + 1 === k ? 0 : c + 1;
+      grid[idx] = nc; px[idx] = pal[nc];
+      x += DX[dir]; y += DY[dir];
+      if (x < 0) x = W - 1; else if (x >= W) x = 0;    // edges wrap around (torus)
+      if (y < 0) y = H - 1; else if (y >= H) y = 0;
+      if (x < bx0) bx0 = x; else if (x > bx1) bx1 = x;
+      if (y < by0) by0 = y; else if (y > by1) by1 = y;
+    }
+    S.x = x; S.y = y; S.dir = dir; S.bx0 = bx0; S.bx1 = bx1; S.by0 = by0; S.by1 = by1;
+  }
+
+  /* ---------- camera: frame the trail's bounding box, never tighter than CAM_MIN cells ---------- */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function camTarget() {
+    var bw = S.bx1 - S.bx0 + 1 + 2 * CAM_PAD, bh = S.by1 - S.by0 + 1 + 2 * CAM_PAD;
+    var w = Math.min(W, Math.max(CAM_MIN, bw, bh * W / H)), h = w * H / W;
+    return {
+      w: w,
+      cx: clamp((S.bx0 + S.bx1 + 1) / 2, w / 2, W - w / 2),
+      cy: clamp((S.by0 + S.by1 + 1) / 2, h / 2, H - h / 2)
+    };
+  }
+  function updateCamera(dt, snap) {
+    var t = camTarget(), c = S.cam;
+    var k = snap || reduceMotion ? 1 : 1 - Math.exp(-dt / CAM_TAU);
+    var lw = Math.log(c.w);
+    var w = Math.exp(lw + (Math.log(t.w) - lw) * k), h = w * H / W;   // ease the zoom in log space
+    var cx = clamp(c.cx + (t.cx - c.cx) * k, w / 2, W - w / 2);
+    var cy = clamp(c.cy + (t.cy - c.cy) * k, h / 2, H - h / 2);
+    var moved = Math.abs(w - c.w) > 1e-3 || Math.abs(cx - c.cx) > 1e-3 || Math.abs(cy - c.cy) > 1e-3;
+    c.w = w; c.cx = cx; c.cy = cy;
+    return moved;
+  }
+
+  var dpr = 1;
+  function fitCanvas() {
+    dpr = window.devicePixelRatio || 1;
+    var r = view.getBoundingClientRect();
+    var w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+    if (view.width !== w || view.height !== h) { view.width = w; view.height = h; S.dirty = true; }
+  }
+
+  function draw() {
+    octx.putImageData(S.img, 0, 0);
+    var vw = view.width, vh = view.height, c = S.cam, ch = c.w * H / W;
+    var sx = c.cx - c.w / 2, sy = c.cy - ch / 2, kx = vw / c.w, ky = vh / ch;
+    vctx.imageSmoothingEnabled = false;
+    vctx.drawImage(off, sx, sy, c.w, ch, 0, 0, vw, vh);
+
+    // faint cell grid when zoomed in close
+    if (kx > 7) {
+      vctx.save();
+      vctx.globalAlpha = Math.min(1, (kx - 7) / 10) * 0.12;
+      vctx.strokeStyle = S.colors[1]; vctx.lineWidth = 1;
+      vctx.beginPath();
+      for (var gx = Math.ceil(sx); gx < sx + c.w; gx++) { var X = Math.round((gx - sx) * kx) + 0.5; vctx.moveTo(X, 0); vctx.lineTo(X, vh); }
+      for (var gy = Math.ceil(sy); gy < sy + ch; gy++) { var Y = Math.round((gy - sy) * ky) + 0.5; vctx.moveTo(0, Y); vctx.lineTo(vw, Y); }
+      vctx.stroke(); vctx.restore();
+    }
+
+    if (S.rule.length) {
+      var a = Math.max(kx * 0.9, 4 * dpr);
+      vctx.fillStyle = "#ff2d55";
+      vctx.fillRect((S.x + 0.5 - sx) * kx - a / 2, (S.y + 0.5 - sy) * ky - a / 2, a, a);
+    }
+  }
+
+  /* ---------- toggle switches: the rule is the L/R switches read left to right, OFF ones skipped ---------- */
+  var SWITCH_SVG =
+    '<svg viewBox="0 0 40 100" aria-hidden="true">' +
+      '<circle cx="20" cy="50" r="15" fill="url(#g-washer)" filter="url(#f-sit)"/>' +
+      '<polygon points="30.5,50 25.25,59.1 14.75,59.1 9.5,50 14.75,40.9 25.25,40.9" fill="url(#g-nut)" stroke="#3b3e43" stroke-width=".7"/>' +
+      '<circle cx="20" cy="50" r="5.6" fill="#24272b" stroke="rgba(255,255,255,.25)" stroke-width=".6"/>' +
+      '<g class="lever up" filter="url(#f-lift)">' +
+        '<path d="M17 50 L15.6 17 L24.4 17 L23 50 Z" fill="url(#g-chrome)"/>' +
+        '<circle class="tip" cx="20" cy="14" r="7.4"/><circle cx="20" cy="14" r="7.4" fill="url(#g-shade)"/><circle cx="20" cy="14" r="7.4" fill="url(#g-spec)"/>' +
+      '</g>' +
+      '<g class="lever down" filter="url(#f-lift)">' +
+        '<path d="M17 50 L15.6 83 L24.4 83 L23 50 Z" fill="url(#g-chrome)"/>' +
+        '<circle class="tip" cx="20" cy="86" r="7.4"/><circle cx="20" cy="86" r="7.4" fill="url(#g-shade)"/><circle cx="20" cy="86" r="7.4" fill="url(#g-spec)"/>' +
+      '</g>' +
+      '<g class="head-on" filter="url(#f-lift)">' +   // centre position: lever points straight at you
+        '<circle cx="20" cy="50" r="7.8" fill="#2b2e33"/><circle cx="20" cy="50" r="7.8" fill="url(#g-shade)"/><circle cx="20" cy="50" r="7.8" fill="url(#g-spec)"/>' +
+      '</g>' +
+    '</svg>';
+
+  var switches = [];
+  function makeSwitch(i) {
+    var el = document.createElement("div");
+    el.className = "sw"; el.tabIndex = 0;
+    el.setAttribute("role", "slider");
+    el.setAttribute("aria-orientation", "vertical");
+    el.setAttribute("aria-label", "Switch " + (i + 1));
+    el.setAttribute("aria-valuemin", "0"); el.setAttribute("aria-valuemax", "2");
+    el.innerHTML = SWITCH_SVG;
+
+    var dragging = false;
+    function fromPointer(e) {
+      var r = el.getBoundingClientRect(), f = (e.clientY - r.top) / r.height;
+      setSwitch(i, f < 0.36 ? "L" : f > 0.64 ? "R" : "O");
+    }
+    el.addEventListener("pointerdown", function (e) {
+      dragging = true; el.setPointerCapture(e.pointerId); fromPointer(e); e.preventDefault(); el.focus();
+    });
+    el.addEventListener("pointermove", function (e) { if (dragging) fromPointer(e); });
+    el.addEventListener("pointerup", function () { dragging = false; });
+    el.addEventListener("pointercancel", function () { dragging = false; });
+    el.addEventListener("keydown", function (e) {
+      var v = VALUE[S.pos[i]];
+      if (e.key === "ArrowUp" || e.key === "ArrowRight") v = Math.min(2, v + 1);
+      else if (e.key === "ArrowDown" || e.key === "ArrowLeft") v = Math.max(0, v - 1);
+      else if (e.key === "Home") v = 2; else if (e.key === "End") v = 0;
+      else if (e.key === " " || e.key === "Enter") v = (v + 2) % 3;
+      else return;
+      e.preventDefault(); setSwitch(i, FROM_VALUE[v]);
+    });
+    $("bank").appendChild(el);
+    return el;
+  }
+
+  function setSwitch(i, p) {
+    if (S.pos[i] === p) return;
+    S.pos[i] = p; applyRule();
+  }
+
+  // Flipping L<->R keeps the drawing going with the new turn. Turning a switch on or off changes
+  // how many colours there are, so the screen starts over (and the camera zooms back in).
+  function applyRule() {
+    var r = S.pos.filter(function (p) { return p !== "O"; }).join("");
+    var lengthChanged = r.length !== S.rule.length;
+    S.rule = r;
+    S.turns = r.split("").map(function (c) { return TURN[c]; });
+    if (lengthChanged) clearGrid();
+    $("lcdRule").textContent = r || "----";
+    renderSwitches(); S.dirty = true;
+  }
+
+  function renderSwitches() {
+    var slot = 0;
+    switches.forEach(function (el, i) {
+      var p = S.pos[i];
+      el.dataset.pos = p;
+      el.setAttribute("aria-valuenow", VALUE[p]);
+      el.setAttribute("aria-valuetext", p === "O" ? "off" : "turn " + SPOKEN[p] + ", colour " + (slot + 1));
+      if (p !== "O") {
+        // the lever's cap shows the colour this switch controls
+        var col = S.colors[slot++];
+        el.querySelectorAll(".tip").forEach(function (t) { t.setAttribute("fill", col); });
+      }
+    });
+  }
+
+  /* ---------- speed knob: 0..100 maps exponentially to RATE_MIN..RATE_MAX steps per second ---------- */
+  var knob = $("knob");
+  (function buildScale() {
+    var NS = "http://www.w3.org/2000/svg", TICKS = 21;
+    for (var j = 0; j < TICKS; j++) {
+      var a = (-135 + 270 * j / (TICKS - 1)) * Math.PI / 180, s = Math.sin(a), c = -Math.cos(a);
+      var major = j % 5 === 0, r0 = major ? 40 : 43;
+      var ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", 50 + r0 * s); ln.setAttribute("y1", 50 + r0 * c);
+      ln.setAttribute("x2", 50 + 47 * s); ln.setAttribute("y2", 50 + 47 * c);
+      if (!major) ln.setAttribute("stroke-width", "1");
+      $("scale").appendChild(ln);
+    }
+  })();
+  function fmtRate(r) { return r >= 100 ? Math.round(r).toLocaleString("en-US") : r.toFixed(1); }
+  // The value is kept as a float so slow drags and trackpad scrolls move the knob smoothly.
+  function setSpeed(v) {
+    v = Math.max(0, Math.min(100, v));
+    S.speed = v;
+    S.rate = RATE_MIN * Math.pow(RATE_MAX / RATE_MIN, v / 100);
+    knob.style.setProperty("--rot", (-135 + 270 * v / 100) + "deg");
+    knob.setAttribute("aria-valuenow", Math.round(v));
+    knob.setAttribute("aria-valuetext", fmtRate(S.rate) + " steps per second");
+    $("lcdRate").textContent = fmtRate(S.rate) + " STEPS/S";
+  }
+  (function knobInput() {
+    // Grab the knob and turn it: the value follows the pointer's angle around the centre
+    // (270° of travel = full range). Pressing on the printed scale jumps straight to that mark.
+    // Very close to the centre the angle is unstable, so there a plain up/right drag is used.
+    var drag = null;
+    function polar(e) {
+      var r = knob.getBoundingClientRect(), dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+      return { a: Math.atan2(dx, -dy) * 180 / Math.PI, r: Math.hypot(dx, dy) / (r.width / 2) };
+    }
+    knob.addEventListener("pointerdown", function (e) {
+      var p = polar(e);
+      if (p.r > 0.7) setSpeed((Math.max(-135, Math.min(135, p.a)) + 135) / 2.7);
+      drag = { a: p.a, x: e.clientX, y: e.clientY };
+      knob.setPointerCapture(e.pointerId); e.preventDefault(); knob.focus();
+    });
+    knob.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      var p = polar(e);
+      if (p.r > 0.25) {
+        var d = p.a - drag.a;
+        if (d > 180) d -= 360; else if (d < -180) d += 360;
+        setSpeed(S.speed + d / 2.7);
+      } else {
+        setSpeed(S.speed + ((e.clientX - drag.x) - (e.clientY - drag.y)) * 0.6);
+      }
+      drag.a = p.a; drag.x = e.clientX; drag.y = e.clientY;
+    });
+    knob.addEventListener("pointerup", function () { drag = null; });
+    knob.addEventListener("pointercancel", function () { drag = null; });
+    knob.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      setSpeed(S.speed - dy * 0.05);                     // one mouse notch ≈ 5, trackpads glide
+    }, { passive: false });
+    knob.addEventListener("keydown", function (e) {
+      var d = { ArrowUp: 2, ArrowRight: 2, ArrowDown: -2, ArrowLeft: -2, PageUp: 10, PageDown: -10 }[e.key];
+      if (e.key === "Home") setSpeed(0); else if (e.key === "End") setSpeed(100);
+      else if (d) setSpeed(S.speed + d); else return;
+      e.preventDefault();
+    });
+  })();
+
+  /* ---------- run button ---------- */
+  function setRunning(v) {
+    S.running = v;
+    $("play").setAttribute("aria-pressed", v ? "true" : "false");
+    $("led").classList.toggle("on", v);
+  }
+  $("play").addEventListener("click", function () { setRunning(!S.running); });
+
+  /* ---------- loop ---------- */
+  var lastT = performance.now();
+  function frame(t) {
+    var dt = Math.min(0.1, Math.max(0, (t - lastT) / 1000)); lastT = t;
+    var stepped = false;
+    // steps per second, not per frame: the knob takes effect on the very next frame at any refresh rate
+    if (S.running && S.rule.length) {
+      S.stepAcc += S.rate * dt;
+      var n = Math.floor(S.stepAcc);
+      if (n > 0) { S.stepAcc -= n; run(n); stepped = true; }
+    }
+    var moved = updateCamera(dt, false);
+    if (stepped || moved || S.dirty) { draw(); S.dirty = false; }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- theme: colours 0 and 1 follow light/dark ---------- */
+  function retheme() { buildPalette(); paintAll(); renderSwitches(); S.dirty = true; }
+  if (window.matchMedia) {
+    var mq = matchMedia("(prefers-color-scheme: dark)");
+    if (mq.addEventListener) mq.addEventListener("change", retheme); else if (mq.addListener) mq.addListener(retheme);
+  }
+  new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  if (window.ResizeObserver) new ResizeObserver(fitCanvas).observe(view); else window.addEventListener("resize", fitCanvas);
+
+  /* ---------- boot: a fresh classic ant, camera tight on it ---------- */
+  buildPalette();
+  for (var i = 0; i < SWITCHES; i++) switches.push(makeSwitch(i));
+  setSpeed(S.speed);
+  applyRule();
+  updateCamera(0, true);
+  fitCanvas(); draw();
+  setRunning(!reduceMotion);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
